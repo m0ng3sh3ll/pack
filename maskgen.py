@@ -50,7 +50,12 @@ class MaskGen:
     def getcomplexity(self, mask):
         """ Return mask complexity. """
         count = 1
+        max_complexity = 1e30  # Prevent overflow
+        
         for char in mask[1:].split("?"):
+            if count > max_complexity:
+                return max_complexity
+                
             if char == "l":   count *= 26
             elif char == "u": count *= 26
             elif char == "d": count *= 10
@@ -65,7 +70,7 @@ class MaskGen:
             elif char == "4" and self.customcharset4len: count *= self.customcharset4len
             else: print("[!] Error, unknown mask ?%s in a mask %s" % (char,mask))
 
-        return count
+        return min(count, max_complexity)
 
     def loadmasks(self, filename):
         """ Load masks and apply filters. """
@@ -78,7 +83,11 @@ class MaskGen:
             mask_occurrence = int(occurrence)
             mask_length = len(mask)/2
             mask_complexity = self.getcomplexity(mask)
-            mask_time = mask_complexity/self.pps
+            # Avoid overflow for very complex masks
+            if mask_complexity > 1e20:
+                mask_time = float('inf')
+            else:
+                mask_time = mask_complexity/self.pps
 
             self.total_occurrence += mask_occurrence
 
