@@ -12,14 +12,15 @@
 #
 # Please see the attached LICENSE file for additional licensing information.
 
-import multiprocessing
 import operator
 import re
 import subprocess
 import sys
+import threading
 import time
 from collections import Counter
 from optparse import OptionGroup, OptionParser
+from queue import Queue
 
 import enchant
 
@@ -32,14 +33,18 @@ HASHCAT_PATH = "hashcat/"
 class RuleGen:
 
     # Initialize Rule Generator class
-    def __init__(self,language="en",providers="aspell,myspell",basename='analysis',threads=multiprocessing.cpu_count()):
+    def __init__(self,language="en",providers="aspell,myspell",basename='analysis',threads=1):
 
         self.threads = threads
 
-        self.enchant_broker = enchant.Broker()
-        self.enchant_broker.set_ordering("*",providers)
-
-        self.enchant = enchant.Dict(language, self.enchant_broker)
+        # Compatible initialization for Python 3.11
+        try:
+            self.enchant_broker = enchant.Broker()
+            self.enchant_broker.set_ordering("*",providers)
+            self.enchant = enchant.Dict(language, self.enchant_broker)
+        except AttributeError:
+            # Fallback for newer enchant versions
+            self.enchant = enchant.Dict(language)
 
         # Output options
         self.basename = basename
@@ -745,7 +750,7 @@ class RuleGen:
         else:
             return True
 
-    def analyze_password(self,password, rules_queue=multiprocessing.Queue(), words_queue=multiprocessing.Queue()):
+    def analyze_password(self,password, rules_queue=None, words_queue=None):
         """ Analyze a single password. """
 
         if self.verbose: print("[*] Analyzing password: %s" % password)
@@ -876,15 +881,15 @@ class RuleGen:
         print("[*] Press Ctrl-C to end execution and generate statistical analysis.")
 
         # Setup queues
-        passwords_queue = multiprocessing.Queue(self.threads)
-        rules_queue = multiprocessing.Queue()
-        words_queue = multiprocessing.Queue()
+        passwords_queue = Queue(self.threads)
+        rules_queue = Queue()
+        words_queue = Queue()
 
         # Start workers
         for i in range(self.threads):
-            multiprocessing.Process(target=self.password_worker, args=(i, passwords_queue, rules_queue, words_queue)).start()
-        multiprocessing.Process(target=self.rule_worker, args=(rules_queue, "%s.rule" % self.basename)).start()
-        multiprocessing.Process(target=self.word_worker, args=(words_queue, "%s.word" % self.basename)).start()
+            threading.Thread(target=self.password_worker, args=(i, passwords_queue, rules_queue, words_queue)).start()
+        threading.Thread(target=self.rule_worker, args=(rules_queue, "%s.rule" % self.basename)).start()
+        threading.Thread(target=self.word_worker, args=(words_queue, "%s.word" % self.basename)).start()
 
         # Continue with the main thread
 
@@ -1013,7 +1018,7 @@ if __name__ == "__main__":
     parser.add_option("-b","--basename", help="Output base name. The following files will be generated: basename.words, basename.rules and basename.stats", default="analysis",metavar="rockyou")
     parser.add_option("-w","--wordlist", help="Use a custom wordlist for rule analysis.", metavar="wiki.dict")
     parser.add_option("-q", "--quiet", action="store_true", dest="quiet", default=False, help="Don't show headers.")
-    parser.add_option("--threads", type="int", default=multiprocessing.cpu_count(), help="Parallel threads to use for processing.")
+    parser.add_option("--threads", type="int", default=1, help="Parallel threads to use for processing.")
 
     wordtune = OptionGroup(parser, "Fine tune source word generation:")
     wordtune.add_option("--maxworddist", help="Maximum word edit distance (Levenshtein)", type="int", default=10, metavar="10")
